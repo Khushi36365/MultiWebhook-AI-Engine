@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AI Agent Dashboard</title>
+
+    <style>
+        body {
+            font-family: Arial;
+            background: #f4f6f9;
+            margin: 0;
+        }
+
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+
+        .chat-panel {
+            width: 50%;
+            padding: 20px;
+            background: white;
+            border-right: 1px solid #ddd;
+        }
+
+        .messages {
+            height: 75vh;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+
+        .msg { margin: 8px 0; }
+        .user { color: blue; }
+        .bot { color: green; }
+
+        .debug-panel {
+            width: 50%;
+            padding: 20px;
+            background: #fafafa;
+            overflow-y: auto;
+        }
+
+        .section { margin-bottom: 20px; }
+
+        .box {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 10px;
+            height: 150px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+
+        input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            height: 42px;
+            box-sizing: border-box;
+        }
+
+        textarea {
+            height: 80px;
+            resize: vertical;
+        }
+
+        button {
+            width: 100%;
+            height: 42px;
+            background: #007bff;
+            color: white;
+            border: none;
+            margin-top: 5px;
+            cursor: pointer;
+        }
+
+        .split {
+            display: flex;
+            gap: 20px;
+            align-items: flex-start;
+        }
+
+        .half {
+            width: 50%;
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+
+<body>
+
+<div class="container">
+
+    <!-- CHAT -->
+    <div class="chat-panel">
+        <h3>💬 Chat</h3>
+
+        <div id="messages" class="messages"></div>
+
+        <input id="message" placeholder="Type message..." />
+        <button onclick="sendMessage()">Send</button>
+    </div>
+
+    <!-- TOOLS -->
+    <div class="debug-panel">
+
+        <div class="section">
+            <h4>📊 Tool Analytics</h4>
+            <div id="analytics" class="box"></div>
+            <button onclick="getAnalytics()">Refresh Analytics</button>
+        </div>
+
+        <div class="section">
+            <h4>🛠 Tools Used</h4>
+            <div id="tools" class="box"></div>
+        </div>
+
+        <div class="section">
+            <h4>📦 Tool Outputs</h4>
+            <div id="outputs" class="box"></div>
+        </div>
+
+        <div class="section">
+            <h4>🧠 Agent State</h4>
+            <div id="agent" class="box"></div>
+        </div>
+
+        
+
+        <div class="split">
+
+            <!-- LEFT -->
+            <div class="half">
+
+                <!-- ADD TOOL -->
+                <div class="section">
+                    <h4>➕ Add Tool</h4>
+
+                    <input id="tool_name" placeholder="Tool Name" />
+                    <input id="tool_desc" placeholder="Description" />
+                    <input id="tool_url" placeholder="URL" />
+                    <input id="tool_method" placeholder="Method (GET/POST)" />
+                    <input id="tool_category" placeholder="Category" />
+                    <input id="tool_schema" placeholder='Input Schema JSON' />
+                    <input id="tool_example" placeholder='Example JSON' />
+
+                    <button onclick="addTool()">Add Tool</button>
+                </div>
+
+                <!-- ALL TOOLS -->
+                <div class="section">
+                    <h4>📋 All Tools</h4>
+
+                    <!-- ✅ SEARCH MOVED HERE -->
+                    <input id="tool_search" placeholder="Search tool..." oninput="filterTools()" />
+
+                    <div id="allTools" class="box"></div>
+
+                    <button onclick="getTools()">Refresh Tools</button>
+                </div>
+
+            </div>
+
+            <!-- RIGHT -->
+            <div class="half">
+
+                <div class="section">
+                    <h4>🧪 Test Tool</h4>
+
+                    <input id="test_tool_name" placeholder="Tool name" />
+
+                    <textarea id="test_tool_input" placeholder='Input JSON'></textarea>
+
+                    <button onclick="testTool()">Test Tool</button>
+
+                    <pre id="test_tool_output" class="box"></pre>
+                </div>
+
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+
+const API_URL = "http://127.0.0.1:8000/chat";
+const TOOL_API = "http://127.0.0.1:8000/tools";
+const sessionId = "user1";
+
+let allToolsCache = [];
+
+// CHAT
+function addMessage(text, type) {
+    const div = document.createElement("div");
+    div.className = "msg " + type;
+    div.innerText = text;
+
+    const messagesDiv = document.getElementById("messages");
+    messagesDiv.appendChild(div);
+
+    // ✅ Auto scroll to bottom
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function updateTools(tools) {
+    document.getElementById("tools").innerHTML =
+        tools.map(t => "🔧 " + t.tool).join("<br>");
+}
+
+function updateOutputs(tools) {
+    document.getElementById("outputs").innerHTML =
+        tools.map(t =>
+            `<b>${t.tool}</b><br>${JSON.stringify(t.output, null, 2)}<br><br>`
+        ).join("");
+}
+
+function updateAgent(data) {
+    document.getElementById("agent").innerText =
+        "Session: " + data.session_id + "\n" +
+        "Tools used: " + (data.tools_used?.length || 0);
+}
+
+async function sendMessage() {
+    const msg = document.getElementById("message").value;
+    if (!msg) return;
+
+    addMessage("You: " + msg, "user");
+
+    const res = await fetch(API_URL, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({message: msg, session_id: sessionId})
+    });
+
+    const data = await res.json();
+
+    addMessage("Bot: " + (data.reply || "(no reply)"), "bot");
+
+    if (data.tools_used) {
+        updateTools(data.tools_used);
+        updateOutputs(data.tools_used);
+    }
+
+    updateAgent(data);
+    document.getElementById("message").value = "";
+}
+
+
+document.getElementById("message").addEventListener("keydown", function(event) {
+    if (event.key === "Enter") {
+        event.preventDefault();  // stop newline / refresh
+        sendMessage();
+    }
+});
+
+// TOOL SYSTEM
+async function getTools() {
+    const res = await fetch(TOOL_API);
+    const data = await res.json();
+
+    allToolsCache = data.tools;
+    renderTools(allToolsCache);
+}
+
+function renderTools(tools) {
+    document.getElementById("allTools").innerHTML =
+        tools.map(tool => `
+            <div onclick="selectTool('${tool.name}')"
+                style="border:1px solid #ddd;padding:10px;margin-bottom:10px;border-radius:8px;background:white;cursor:pointer;">
+                <b>${tool.name}</b><br>
+                <small>📂 ${tool.category || "general"}</small><br>
+                <small>⚙️ ${tool.method}</small><br>
+                <small style="color:green;">● Active</small>
+            </div>
+        `).join("");
+}
+
+function filterTools() {
+    const q = document.getElementById("tool_search").value.toLowerCase();
+
+    const filtered = allToolsCache.filter(t =>
+        t.name.toLowerCase().includes(q) ||
+        (t.category || "").toLowerCase().includes(q)
+    );
+
+    renderTools(filtered);
+}
+
+function selectTool(name) {
+    document.getElementById("test_tool_name").value = name;
+}
+
+// ADD TOOL
+async function addTool() {
+    let example = {};
+    let inputSchema = {};
+
+    try {
+        example = JSON.parse(document.getElementById("tool_example").value || "{}");
+        inputSchema = JSON.parse(document.getElementById("tool_schema").value || "{}");
+    } catch {
+        alert("Invalid JSON");
+        return;
+    }
+
+    const body = {
+        name: document.getElementById("tool_name").value,
+        description: document.getElementById("tool_desc").value,
+        category: document.getElementById("tool_category").value,
+        url: document.getElementById("tool_url").value,
+        method: document.getElementById("tool_method").value || "POST",
+        input_schema: inputSchema,
+        example: example
+    };
+
+    await fetch(TOOL_API, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify(body)
+    });
+
+    alert("Tool added!");
+    getTools();
+}
+
+// TEST TOOL
+async function testTool() {
+    const toolName = document.getElementById("test_tool_name").value;
+
+    let input = {};
+    try {
+        input = JSON.parse(document.getElementById("test_tool_input").value || "{}");
+    } catch {
+        alert("Invalid JSON");
+        return;
+    }
+
+    const res = await fetch("http://127.0.0.1:8000/tools/test", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({tool_name: toolName, input})
+    });
+
+    const data = await res.json();
+
+    document.getElementById("test_tool_output").innerText =
+        JSON.stringify(data, null, 2);
+}
+
+async function getAnalytics() {
+
+    const res = await fetch("http://127.0.0.1:8000/tools/analytics/summary");
+    const data = await res.json();
+
+    document.getElementById("analytics").innerHTML =
+        data.summary.map(t => `
+            <div style="border-bottom:1px solid #ddd; margin-bottom:5px;">
+                <b>${t._id}</b><br>
+                Uses: ${t.count}<br>
+                Success: ${(t.success_rate * 100).toFixed(1)}%<br>
+                Latency: ${Math.round(t.avg_latency)} ms<br>
+                Last Used: ${new Date(t.last_used).toLocaleString("en-IN", { timeZone: "Asia/Kolkata" })}
+            </div>
+        `).join("");
+}
+
+</script>
+
+</body>
+</html>
